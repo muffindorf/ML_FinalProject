@@ -1,0 +1,132 @@
+---
+title: "Machine Learning Final Project - Human Activity Recognition"
+author: "Terry Wang"
+date: "9/10/2017"
+output: html_document
+---
+
+```{r load packages, echo=FALSE, results='hide'}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(ggplot2)
+set.seed(111)
+```
+
+# Executive Summary
+
+The goal of this study is to classify 5 different human activity using sensor measurements.  Using random forest algorithm and 501 trees, I am able to achieve 0.61% out-of-bag error rate and 0.60% out of sample error rate using k-folds cross validation.  Using this algorithm I was able to correct predict all 20 cases in the test dataset.  This shows that random forest provides satisfactory performance for human activity classification.
+
+# Source
+
+The data is from http://groupware.les.inf.puc-rio.br/har.  Big thanks to them for making the data available.
+
+# Loading and Cleaning Data
+
+The data is first downloaded from the following links:
+
+```{r, loading data}
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+Afterwards, we take out all of the columns that are either NAs or are not predictors.
+
+```{r, cleaning data}
+n <- which(sapply(testing, function(x) all(is.na(x))))
+train1 <- training[, -n]
+test1 <- testing[, -n]
+
+train1 <- train1[, -c(1:7)]
+test1 <- test1[, -c(1:7)]
+```
+
+# Exploring the Data
+
+Our training data has `r dim(train1)[1]` observations while our test data has only `r dim(test1)[1]` observations, with `r dim(train1)[2]-1` predictors.
+
+We can also make a table of the outcome variable in the training data:
+
+```{r, outcome table}
+table(train1$classe)
+```
+
+We can see that outcome class A is overrepresented in the training data, but otherwise we don't have a major problem with having not enough observations for a particular outcome or skewed distribution of outcomes.
+
+# The Prediction Algorithm and Cross Validation
+
+I decided to predict the outcome using the random forest algorithm with 501 trees because it is a tried and true tool for classification problems.  I also decided to use a 3-fold cross validation technique to assess the out-of-sample error rate of the prediction algorithm.  We will divide the training data into 3 folds and validate the prediction algorithm.
+
+```{r, prediction algorithm}
+folds <- createFolds(y = train1$classe, k = 3, list = FALSE)
+train_fold1 <- train1[folds!=1, ]
+test_fold1 <- train1[folds==1, ]
+train_fold2 <- train1[folds!=2, ]
+test_fold2 <- train1[folds==2, ]
+train_fold3 <- train1[folds!=3, ]
+test_fold3 <- train1[folds==3, ]
+
+rf1 <- randomForest(x = train_fold1[,c(1:52)], y = train_fold1$classe, xtest = test_fold1[,c(1:52)], ytest = test_fold1$classe, ntree = 501)
+rf2 <- randomForest(x = train_fold2[,c(1:52)], y = train_fold2$classe, xtest = test_fold2[,c(1:52)], ytest = test_fold2$classe, ntree = 501)
+rf3 <- randomForest(x = train_fold3[,c(1:52)], y = train_fold3$classe, xtest = test_fold3[,c(1:52)], ytest = test_fold3$classe, ntree = 501)
+```
+
+To find out whether 501 trees is a good number to use, we can plot the oob error rate against the number of trees.  To use as an example, we will plot this graph for rf1, or the random forest algorithm for the first fold:
+
+```{r, oob ntree plot}
+plot(rf1)
+```
+
+We can observe that the error rate don't change much after about 300 trees, indicating that 501 trees is a good number of trees to grow as error rates are convering to their lowest numbers.
+
+We next look at the confusion matrix of the first fold and we observe the following:
+
+```{r, confmatrix rf1}
+rf1
+confusionMatrix(train_fold1$classe, rf1$predicted)$byClass
+confusionMatrix(test_fold1$class, rf1$test$predicted)$byClass
+```
+
+We can observe two things from this matrix:
+1. The error rate is very low for the training set at only 0.58% on average, with model accuracy and specificity all above 98%.  This is a really good predictive model for the training data.
+2. On the test data we observe very similar findings, indicating that the algorithm in fact can be scaled and predict out of sample data well.
+
+We do observe similar findings on the other folds, and we can calculate the average out-of-bag and out-of-sample error rates of this algorithm:
+
+```{r, error rates}
+train_fold1$predRight <- train_fold1$classe==rf1$predicted
+test_fold1$predRight <- test_fold1$classe==rf1$test$predicted
+oob_fold1 <- (length(train_fold1$predRight)-sum(train_fold1$predRight))/length(train_fold1$predRight)
+oos_fold1 <- (length(test_fold1$predRight)-sum(test_fold1$predRight))/length(test_fold1$predRight)
+
+train_fold2$predRight <- train_fold2$classe==rf2$predicted
+test_fold2$predRight <- test_fold2$classe==rf2$test$predicted
+oob_fold2 <- (length(train_fold2$predRight)-sum(train_fold2$predRight))/length(train_fold2$predRight)
+oos_fold2 <- (length(test_fold2$predRight)-sum(test_fold2$predRight))/length(test_fold2$predRight)
+
+train_fold3$predRight <- train_fold3$classe==rf3$predicted
+test_fold3$predRight <- test_fold3$classe==rf3$test$predicted
+oob_fold3 <- (length(train_fold3$predRight)-sum(train_fold3$predRight))/length(train_fold3$predRight)
+oos_fold3 <- (length(test_fold3$predRight)-sum(test_fold3$predRight))/length(test_fold3$predRight)
+
+print("Average OOB error rate:")
+print(round(mean(c(oob_fold1, oob_fold2, oob_fold3)), 4))
+print("Average Out of Sample error rate:")
+print(round(mean(c(oos_fold1, oos_fold2, oos_fold3)), 4))
+```
+
+Since we don't observe big differences between the error rates on the training and testing folds, we are more confident that this prediction algorithm can be a good option for predicting out-of-sample data.
+
+# Final Predictions
+
+```{r final predictions}
+mod_rf <- randomForest(x = train1[,c(1:52)], y = train1$classe, xtest = test1[,c(1:52)], ytest = test1$classe, ntree = 501)
+print("Final Predictions:")
+mod_rf$test$predicted
+```
+
+These results are 100% correct according to the quiz on Coursera.
+
+# Conclusion
+
+This shows that for this case random forest is a very accurate prediction algorithm.  There is no overfit in the training data and the outcomes are correctly predicted in the test data.
